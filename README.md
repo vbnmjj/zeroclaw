@@ -262,6 +262,9 @@ default_provider = "openrouter"
 default_model = "anthropic/claude-sonnet-4-20250514"
 default_temperature = 0.7
 
+[gemini]
+proxy = "http://127.0.0.1:7890"  # optional; if unset, Gemini uses direct requests
+
 [memory]
 backend = "sqlite"              # "sqlite", "markdown", "none"
 auto_save = true
@@ -313,6 +316,19 @@ format = "openclaw"             # "openclaw" (default, markdown files) or "aieos
 # aieos_path = "identity.json"  # path to AIEOS JSON file (relative to workspace or absolute)
 # aieos_inline = '{"identity":{"names":{"first":"Nova"}}}'  # inline AIEOS JSON
 ```
+
+Gemini proxy example (copy/paste):
+
+```toml
+# Use Gemini provider with a local proxy (HTTP/SOCKS)
+default_provider = "gemini"
+default_model = "gemini-2.0-flash"
+
+[gemini]
+proxy = "http://127.0.0.1:7890"
+```
+
+If `[gemini].proxy` is not configured, ZeroClaw keeps the original direct Gemini request behavior.
 
 ## Identity System (AIEOS Support)
 
