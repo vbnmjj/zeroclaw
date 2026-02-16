@@ -464,13 +464,17 @@ pub async fn run(
     )?);
     tracing::info!(backend = mem.name(), "Memory initialized");
 
+    let provider_factory_options = providers::ProviderFactoryOptions {
+        gemini_proxy: config.gemini.proxy.clone(),
+    };
+
     // ── Tools (including memory tools) ────────────────────────────
     let composio_key = if config.composio.enabled {
         config.composio.api_key.as_deref()
     } else {
         None
     };
-    let tools_registry = tools::all_tools_with_runtime(
+    let tools_registry = tools::all_tools_with_runtime_and_provider_options(
         &security,
         runtime,
         mem.clone(),
@@ -479,6 +483,7 @@ pub async fn run(
         &config.http_request,
         &config.agents,
         config.api_key.as_deref(),
+        &provider_factory_options,
     );
 
     // ── Resolve provider ─────────────────────────────────────────
@@ -492,12 +497,13 @@ pub async fn run(
         .or(config.default_model.as_deref())
         .unwrap_or("anthropic/claude-sonnet-4");
 
-    let provider: Box<dyn Provider> = providers::create_routed_provider(
+    let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
         provider_name,
         config.api_key.as_deref(),
         &config.reliability,
         &config.model_routes,
         model_name,
+        &provider_factory_options,
     )?;
 
     observer.record_event(&ObserverEvent::AgentStart {

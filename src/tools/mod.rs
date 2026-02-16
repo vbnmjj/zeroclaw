@@ -64,7 +64,8 @@ pub fn all_tools(
     agents: &HashMap<String, DelegateAgentConfig>,
     fallback_api_key: Option<&str>,
 ) -> Vec<Box<dyn Tool>> {
-    all_tools_with_runtime(
+    let provider_factory_options = crate::providers::ProviderFactoryOptions::default();
+    all_tools_with_runtime_and_provider_options(
         security,
         Arc::new(NativeRuntime::new()),
         memory,
@@ -73,6 +74,7 @@ pub fn all_tools(
         http_config,
         agents,
         fallback_api_key,
+        &provider_factory_options,
     )
 }
 
@@ -86,6 +88,32 @@ pub fn all_tools_with_runtime(
     http_config: &crate::config::HttpRequestConfig,
     agents: &HashMap<String, DelegateAgentConfig>,
     fallback_api_key: Option<&str>,
+) -> Vec<Box<dyn Tool>> {
+    let provider_factory_options = crate::providers::ProviderFactoryOptions::default();
+    all_tools_with_runtime_and_provider_options(
+        security,
+        runtime,
+        memory,
+        composio_key,
+        browser_config,
+        http_config,
+        agents,
+        fallback_api_key,
+        &provider_factory_options,
+    )
+}
+
+/// Create full tool registry including memory tools and optional Composio, with provider options.
+pub fn all_tools_with_runtime_and_provider_options(
+    security: &Arc<SecurityPolicy>,
+    runtime: Arc<dyn RuntimeAdapter>,
+    memory: Arc<dyn Memory>,
+    composio_key: Option<&str>,
+    browser_config: &crate::config::BrowserConfig,
+    http_config: &crate::config::HttpRequestConfig,
+    agents: &HashMap<String, DelegateAgentConfig>,
+    fallback_api_key: Option<&str>,
+    provider_factory_options: &crate::providers::ProviderFactoryOptions,
 ) -> Vec<Box<dyn Tool>> {
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(ShellTool::new(security.clone(), runtime)),
@@ -131,9 +159,10 @@ pub fn all_tools_with_runtime(
 
     // Add delegation tool when agents are configured
     if !agents.is_empty() {
-        tools.push(Box::new(DelegateTool::new(
+        tools.push(Box::new(DelegateTool::with_provider_options(
             agents.clone(),
             fallback_api_key.map(String::from),
+            provider_factory_options.clone(),
         )));
     }
 
@@ -320,7 +349,15 @@ mod tests {
             },
         );
 
-        let tools = all_tools(&security, mem, None, &browser, &http, &agents, Some("sk-test"));
+        let tools = all_tools(
+            &security,
+            mem,
+            None,
+            &browser,
+            &http,
+            &agents,
+            Some("sk-test"),
+        );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"delegate"));
     }

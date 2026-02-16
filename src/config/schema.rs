@@ -34,6 +34,9 @@ pub struct Config {
     #[serde(default)]
     pub reliability: ReliabilityConfig,
 
+    #[serde(default)]
+    pub gemini: GeminiConfig,
+
     /// Model routing rules — route `hint:<name>` to specific provider+model combos.
     #[serde(default)]
     pub model_routes: Vec<ModelRouteConfig>,
@@ -653,6 +656,16 @@ impl Default for ReliabilityConfig {
     }
 }
 
+// ── Gemini provider ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GeminiConfig {
+    /// Optional outbound proxy URL for Gemini API requests.
+    /// Example: "http://127.0.0.1:7890" or "socks5h://127.0.0.1:1080"
+    #[serde(default)]
+    pub proxy: Option<String>,
+}
+
 // ── Model routing ────────────────────────────────────────────────
 
 /// Route a task hint to a specific provider + model.
@@ -964,7 +977,7 @@ pub struct SandboxConfig {
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
-            enabled: None,  // Auto-detect
+            enabled: None, // Auto-detect
             backend: SandboxBackend::Auto,
             firejail_args: Vec::new(),
         }
@@ -1104,6 +1117,7 @@ impl Default for Config {
             autonomy: AutonomyConfig::default(),
             runtime: RuntimeConfig::default(),
             reliability: ReliabilityConfig::default(),
+            gemini: GeminiConfig::default(),
             model_routes: Vec::new(),
             heartbeat: HeartbeatConfig::default(),
             channels_config: ChannelsConfig::default(),
@@ -1350,6 +1364,7 @@ mod tests {
         assert!(c.api_key.is_none());
         assert!(c.workspace_dir.to_string_lossy().contains("workspace"));
         assert!(c.config_path.to_string_lossy().contains("config.toml"));
+        assert!(c.gemini.proxy.is_none());
     }
 
     #[test]
@@ -1440,6 +1455,7 @@ mod tests {
                 ..RuntimeConfig::default()
             },
             reliability: ReliabilityConfig::default(),
+            gemini: GeminiConfig::default(),
             model_routes: Vec::new(),
             heartbeat: HeartbeatConfig {
                 enabled: true,
@@ -1513,6 +1529,7 @@ default_temperature = 0.7
         assert_eq!(parsed.memory.archive_after_days, 7);
         assert_eq!(parsed.memory.purge_after_days, 30);
         assert_eq!(parsed.memory.conversation_retention_days, 30);
+        assert!(parsed.gemini.proxy.is_none());
     }
 
     #[test]
@@ -1533,6 +1550,7 @@ default_temperature = 0.7
             autonomy: AutonomyConfig::default(),
             runtime: RuntimeConfig::default(),
             reliability: ReliabilityConfig::default(),
+            gemini: GeminiConfig::default(),
             model_routes: Vec::new(),
             heartbeat: HeartbeatConfig::default(),
             channels_config: ChannelsConfig::default(),
@@ -2086,8 +2104,24 @@ default_temperature = 0.7
         assert!(!c.composio.enabled);
         assert!(c.composio.api_key.is_none());
         assert!(c.secrets.encrypt);
+        assert!(c.gemini.proxy.is_none());
         assert!(!c.browser.enabled);
         assert!(c.browser.allowed_domains.is_empty());
+    }
+
+    #[test]
+    fn config_parses_gemini_proxy_section() {
+        let toml_str = r#"
+default_temperature = 0.7
+
+[gemini]
+proxy = "http://127.0.0.1:7890"
+"#;
+        let parsed: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            parsed.gemini.proxy.as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
     }
 
     #[test]
@@ -2467,10 +2501,11 @@ temperature = 0.3
                 max_depth: 3,
             },
         );
-        let mut config = Config {
+        let config = Config {
             config_path: config_path.clone(),
             workspace_dir: zeroclaw_dir.join("workspace"),
             secrets: SecretsConfig { encrypt: true },
+            gemini: GeminiConfig::default(),
             agents,
             ..Config::default()
         };
@@ -2525,6 +2560,7 @@ temperature = 0.3
             config_path: config_path.clone(),
             workspace_dir: zeroclaw_dir.join("workspace"),
             secrets: SecretsConfig { encrypt: false },
+            gemini: GeminiConfig::default(),
             agents,
             ..Config::default()
         };
