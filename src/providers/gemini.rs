@@ -6,7 +6,7 @@
 use crate::providers::traits::Provider;
 use async_trait::async_trait;
 use directories::UserDirs;
-use reqwest::Client;
+use reqwest::{Client, Proxy};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -128,6 +128,14 @@ impl GeminiProvider {
     /// 3. `GOOGLE_API_KEY` environment variable
     /// 4. Gemini CLI OAuth tokens (`~/.gemini/oauth_creds.json`)
     pub fn new(api_key: Option<&str>) -> Self {
+        Self::with_proxy(api_key, None)
+    }
+
+    /// Create a Gemini provider with optional outbound proxy support.
+    ///
+    /// `proxy_url` should be a valid proxy URL accepted by reqwest
+    /// (for example: `http://127.0.0.1:7890`).
+    pub fn with_proxy(api_key: Option<&str>, proxy_url: Option<&str>) -> Self {
         let resolved_auth = api_key
             .and_then(Self::normalize_non_empty)
             .map(GeminiAuth::ExplicitKey)
@@ -137,12 +145,27 @@ impl GeminiProvider {
 
         Self {
             auth: resolved_auth,
-            client: Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            client: Self::build_http_client(proxy_url),
         }
+    }
+
+    fn build_http_client(proxy_url: Option<&str>) -> Client {
+        let mut builder = Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(std::time::Duration::from_secs(10));
+
+        if let Some(proxy_url) = proxy_url.and_then(Self::normalize_non_empty) {
+            match Proxy::all(&proxy_url) {
+                Ok(proxy) => {
+                    builder = builder.proxy(proxy);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Ignoring invalid Gemini proxy configuration");
+                }
+            }
+        }
+
+        builder.build().unwrap_or_else(|_| Client::new())
     }
 
     fn normalize_non_empty(value: &str) -> Option<String> {
@@ -358,6 +381,25 @@ mod tests {
     fn provider_rejects_empty_key() {
         let provider = GeminiProvider::new(Some(""));
         assert!(!matches!(provider.auth, Some(GeminiAuth::ExplicitKey(_))));
+    }
+
+    #[test]
+    fn provider_creates_with_proxy() {
+        let provider =
+            GeminiProvider::with_proxy(Some("test-api-key"), Some("http://127.0.0.1:7890"));
+        assert!(matches!(
+            provider.auth,
+            Some(GeminiAuth::ExplicitKey(ref key)) if key == "test-api-key"
+        ));
+    }
+
+    #[test]
+    fn provider_ignores_invalid_proxy_and_still_initializes() {
+        let provider = GeminiProvider::with_proxy(Some("test-api-key"), Some("://invalid proxy"));
+        assert!(matches!(
+            provider.auth,
+            Some(GeminiAuth::ExplicitKey(ref key)) if key == "test-api-key"
+        ));
     }
 
     #[test]

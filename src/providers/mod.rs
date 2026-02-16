@@ -174,9 +174,26 @@ fn parse_custom_provider_url(
     }
 }
 
+/// Provider factory options that influence provider-specific client setup.
+#[derive(Debug, Clone, Default)]
+pub struct ProviderFactoryOptions {
+    /// Optional outbound proxy URL for Gemini requests.
+    pub gemini_proxy: Option<String>,
+}
+
 /// Factory: create the right provider from config
-#[allow(clippy::too_many_lines)]
 pub fn create_provider(name: &str, api_key: Option<&str>) -> anyhow::Result<Box<dyn Provider>> {
+    let options = ProviderFactoryOptions::default();
+    create_provider_with_options(name, api_key, &options)
+}
+
+/// Factory: create the right provider from config with provider options.
+#[allow(clippy::too_many_lines)]
+pub fn create_provider_with_options(
+    name: &str,
+    api_key: Option<&str>,
+    options: &ProviderFactoryOptions,
+) -> anyhow::Result<Box<dyn Provider>> {
     let resolved_key = resolve_api_key(name, api_key);
     let key = resolved_key.as_deref();
     match name {
@@ -188,7 +205,10 @@ pub fn create_provider(name: &str, api_key: Option<&str>) -> anyhow::Result<Box<
         // The api_key parameter is ignored to avoid it being misinterpreted as a base_url.
         "ollama" => Ok(Box::new(ollama::OllamaProvider::new(None))),
         "gemini" | "google" | "google-gemini" => {
-            Ok(Box::new(gemini::GeminiProvider::new(key)))
+            Ok(Box::new(gemini::GeminiProvider::with_proxy(
+                key,
+                options.gemini_proxy.as_deref(),
+            )))
         }
 
         // ── OpenAI-compatible providers ──────────────────────
@@ -305,11 +325,22 @@ pub fn create_resilient_provider(
     api_key: Option<&str>,
     reliability: &crate::config::ReliabilityConfig,
 ) -> anyhow::Result<Box<dyn Provider>> {
+    let options = ProviderFactoryOptions::default();
+    create_resilient_provider_with_options(primary_name, api_key, reliability, &options)
+}
+
+/// Create provider chain with retry and fallback behavior, with provider options.
+pub fn create_resilient_provider_with_options(
+    primary_name: &str,
+    api_key: Option<&str>,
+    reliability: &crate::config::ReliabilityConfig,
+    options: &ProviderFactoryOptions,
+) -> anyhow::Result<Box<dyn Provider>> {
     let mut providers: Vec<(String, Box<dyn Provider>)> = Vec::new();
 
     providers.push((
         primary_name.to_string(),
-        create_provider(primary_name, api_key)?,
+        create_provider_with_options(primary_name, api_key, options)?,
     ));
 
     for fallback in &reliability.fallback_providers {
@@ -326,7 +357,7 @@ pub fn create_resilient_provider(
             );
         }
 
-        match create_provider(fallback, api_key) {
+        match create_provider_with_options(fallback, api_key, options) {
             Ok(provider) => providers.push((fallback.clone(), provider)),
             Err(e) => {
                 tracing::warn!(
@@ -354,8 +385,28 @@ pub fn create_routed_provider(
     model_routes: &[crate::config::ModelRouteConfig],
     default_model: &str,
 ) -> anyhow::Result<Box<dyn Provider>> {
+    let options = ProviderFactoryOptions::default();
+    create_routed_provider_with_options(
+        primary_name,
+        api_key,
+        reliability,
+        model_routes,
+        default_model,
+        &options,
+    )
+}
+
+/// Create a routed provider with retry/fallback behavior and provider options.
+pub fn create_routed_provider_with_options(
+    primary_name: &str,
+    api_key: Option<&str>,
+    reliability: &crate::config::ReliabilityConfig,
+    model_routes: &[crate::config::ModelRouteConfig],
+    default_model: &str,
+    options: &ProviderFactoryOptions,
+) -> anyhow::Result<Box<dyn Provider>> {
     if model_routes.is_empty() {
-        return create_resilient_provider(primary_name, api_key, reliability);
+        return create_resilient_provider_with_options(primary_name, api_key, reliability, options);
     }
 
     // Collect unique provider names needed
@@ -374,7 +425,7 @@ pub fn create_routed_provider(
             .find(|r| &r.provider == name)
             .and_then(|r| r.api_key.as_deref())
             .or(api_key);
-        match create_resilient_provider(name, key, reliability) {
+        match create_resilient_provider_with_options(name, key, reliability, options) {
             Ok(provider) => providers.push((name.clone(), provider)),
             Err(e) => {
                 if name == primary_name {
@@ -446,6 +497,14 @@ mod tests {
         assert!(create_provider("google-gemini", Some("test-key")).is_ok());
         // Should also work without key (will try CLI auth)
         assert!(create_provider("gemini", None).is_ok());
+    }
+
+    #[test]
+    fn factory_gemini_with_proxy_options() {
+        let options = ProviderFactoryOptions {
+            gemini_proxy: Some("http://127.0.0.1:7890".into()),
+        };
+        assert!(create_provider_with_options("gemini", Some("test-key"), &options).is_ok());
     }
 
     // ── OpenAI-compatible providers ──────────────────────────
